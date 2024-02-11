@@ -8,7 +8,7 @@ It is based on Andy Sloane's float-less `donut.c` code, which can be found [here
 
 Theoretically, this sketch should run on any Arduino-compatible MCU with at least 2K of RAM (e.g. ATmega328/Arduino Uno).
 
-In practice, it has only been confirmed to be working on the ESP32, and more work is needed to get it working on AVR MCUs.
+This sketch has been confirmed to be working on the ESP32 and Arduino Mega.
 
 ## Installation/Usage
 
