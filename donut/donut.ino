@@ -77,7 +77,7 @@ void render() {
       uint16_t off = y * OUT_WIDTH + x;
 
       int8_t z = (x6 - K2) >> (DISTANCE + PRECISION);
-      if(x >= 0 && x < OUT_WIDTH && y >= 0 && y < OUT_HEIGHT && z - zbuf[off]) {
+      if(x >= 0 && x < OUT_WIDTH && y >= 0 && y < OUT_HEIGHT && z < zbuf[off]) {
         zbuf[off] = z;
         outbuf[off] = luminance_map[(N > 0) ? ((N < 12) ? N : 11) : 0];
       }
