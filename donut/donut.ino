@@ -1,32 +1,18 @@
 /*
  * An Arduino port of the famous donut.c
- * Original code by Andy Sloane (a1k0n)
+ * Original code by Andy Sloane (a1k0n) - https://gist.github.com/a1k0n/8ea6516b4946ab36348fb61703dc3194
  * Ported code   by Thanh Vinh Nguyen (itsmevjnk)
  *
  * This sketch is in the public domain; refer to the LICENSE file for more information.
  */
 
-/* donut rendering options */
-#define PRECISION             10      // number of bits of precision (min 7)
-#define DISTANCE              5UL     // donut distance
-
-#define OUT_WIDTH             40      // output buffer width
-#define OUT_HEIGHT            22      // output buffer height
-#define OUT_PAD               15      // number of spaces to pad on the left of output
-
-#define DONUT_WIDTH           25      // donut width
-#define DONUT_HEIGHT          12      // donut height
+/* render options */
+#define R1                    1UL
+#define R2                    2UL
 
 /* output options */
 #define BAUD                  115200  // change this to the baud rate you prefer
 #define DELAY                 0       // delay duration (in milliseconds) between frames
-
-/* intermediaries */
-#define BUF_SIZE              (OUT_WIDTH * OUT_HEIGHT)
-#define PRECISION_MUL         (1UL << PRECISION)
-// R1 is assumed to be 1; any other value seems to break the code
-#define R2                    (PRECISION_MUL << 1)
-#define K2                    (DISTANCE << (PRECISION << 1))
 
 const char luminance_map[] = ".,-~:;=!*#$@"; // NOTE: this is small enough to be stored in RAM so we'll do that to improve perf
 
@@ -34,96 +20,135 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(BAUD);
   while(!Serial);
-  Serial.print("\x1b[2J"); // clear screen
+  Serial.print("\x1b[H\x1b[J"); // clear screen and return to home
 }
 
-char outbuf[BUF_SIZE]; // output buffer (each element stores 2 luminance values to save more space)
-char zbuf[BUF_SIZE]; // Z buffer
-
-/* rotate macro */
-int32_t rotate_tmp;
-#define R(mul, shift, x, y) \
-  rotate_tmp = x; \
-  x -= mul * (int32_t)y >> shift; \
-  y += mul * rotate_tmp >> shift; \
-  rotate_tmp = (3UL << (PRECISION << 1)) - (int32_t)x*x - (int32_t)y*y >> (PRECISION + 1); \
-  x = (int32_t)x * rotate_tmp >> PRECISION; \
-  y = (int32_t)y * rotate_tmp >> PRECISION;
-
-int16_t sinA = PRECISION_MUL, cosA = 0, sinB = PRECISION_MUL, cosB = 0;
-
 /* render function */
+#define R(s, x, y)          x -= (y >> s); y += (x >> s)
+
+int16_t length_cordic(int16_t x, int16_t y, int16_t* x2_, int16_t y2) {
+  int16_t x2 = *x2_;
+  if(x < 0) {
+    x = -x;
+    x2 = -x2;
+  }
+  for(uint8_t i = 0; i < 8; i++) {
+    int16_t t = x, t2 = x2;
+    if(y < 0) {
+      x -= y >> i;
+      y += t >> i;
+      x2 -= y2 >> i;
+      y2 += t2 >> i;
+    } else {
+      x += y >> i;
+      y -= t >> i;
+      x2 += y2 >> i;
+      y2 -= t2 >> i;
+    }
+  }
+
+  *x2_ = (x2 >> 1) + (x2 >> 3);
+  return (x >> 1) + (x >> 3);
+}
+
+int16_t sB = 0, cB = 16384;
+int16_t sA = 11583, cA = 11583;
+int16_t sAsB = 0, cAsB = 0;
+int16_t sAcB = 11583, cAcB = 11583;
+
+#define p0(n)                   (((int32_t)n) + (((int32_t)n << 2)) >> 6) // dz * n >> 6 with dz = 5
+#define r1i                     (R1 << 8) // r1 * 256
+#define r2i                     (R2 << 8) // r2 * 256
 void render() {
-  memset(outbuf, ' ', BUF_SIZE);
-  memset(zbuf, 127, BUF_SIZE);
+  int16_t x1_16 = cAcB << 2;
+  
+  int16_t p0x = p0(sB);
+  int16_t p0y = p0(sAcB);
+  int16_t p0z = -p0(cAcB);
 
-  int16_t sinJ = 0, cosJ = PRECISION_MUL;
-  for(uint8_t j = 0; j < 90; j++) {
-    int16_t sinI = 0, cosI = PRECISION_MUL;
-    for(uint16_t i = 0; i < 314; i++) {
-      // Serial.print(sinI, DEC); Serial.print(',');
-      // Serial.print(cosI, DEC); Serial.print(',');
-      // Serial.print(sinJ, DEC); Serial.print(',');
-      // Serial.print(cosJ, DEC); Serial.print(',');
+  int16_t yincC = (cA >> 6) + (cA >> 5);      // 12*cA >> 8;
+  int16_t yincS = (sA >> 6) + (sA >> 5);      // 12*sA >> 8;
+  int16_t xincX = (cB >> 7) + (cB >> 6);      // 6*cB >> 8;
+  int16_t xincY = (sAsB >> 7) + (sAsB >> 6);  // 6*sAsB >> 8;
+  int16_t xincZ = (cAsB >> 7) + (cAsB >> 6);  // 6*cAsB >> 8;
+  int16_t ycA = -((cA >> 1) + (cA >> 4));     // -12 * yinc1 = -9*cA >> 4;
+  int16_t ysA = -((sA >> 1) + (sA >> 4));     // -12 * yinc2 = -9*sA >> 4;
 
-      int16_t x0 = cosJ + R2;
-      int16_t x1 = (int32_t)cosI * x0 >> PRECISION;
-      int16_t x2 = cosA * sinJ >> PRECISION;
-      int16_t x3 = (int32_t)sinI * x0 >> PRECISION;
-      int16_t x4 = x2 - ((int32_t)sinA * x3 >> PRECISION);
-      int16_t x5 = (int32_t)sinA * sinJ >> PRECISION;
-      int32_t x6 = K2 + PRECISION_MUL * (int32_t)x5 + (int32_t)cosA * x3;
-      int16_t x7 = (int32_t)cosJ * sinI >> PRECISION;
+  for(uint8_t j = 0; j < 23; j++, ycA += yincC, ysA += yincS) {
+    int16_t xsAsB = (sAsB >> 4) - sAsB;  // -40*xincY
+    int16_t xcAsB = (cAsB >> 4) - cAsB;  // -40*xincZ;
 
-      int8_t x = (OUT_WIDTH >> 1) + DONUT_WIDTH * ((int32_t)cosB * x1 - (int32_t)sinB * x4) / x6;
-      int8_t y = (OUT_HEIGHT >> 1) + DONUT_HEIGHT * ((int32_t)cosB * x4 + (int32_t)sinB * x1) / x6;
-      int8_t N = (-(int32_t)cosA * x7 - (int32_t)cosB * ((-sinA * x7 >> PRECISION) + x2) - (int32_t)cosI * ((int32_t)cosJ * sinB >> PRECISION) >> PRECISION) - (int32_t)x5 >> (PRECISION - 3);
+    int16_t vxi14 = (cB >> 4) - cB - sB; // -40*xincX - sB;
+    int16_t vyi14 = ycA - xsAsB - sAcB;
+    int16_t vzi14 = ysA + xcAsB + cAcB;
 
-      uint16_t off = y * OUT_WIDTH + x;
+    for(uint8_t i = 0; i < 79; i++, vxi14 += xincX, vyi14 -= xincY, vzi14 += xincZ) {
+      int16_t t = (5 - R1 - R2) << 8; // (256 * dz) - r2i - r1i = (dz - r2 - r1) * 256 w/ dz = 5
 
-      int8_t z = (x6 - K2) >> (DISTANCE + PRECISION);
+      int16_t px = p0x + (vxi14 >> 5); // assuming t = 512, t*vxi>>8 == vxi<<1
+      int16_t py = p0y + (vyi14 >> 5);
+      int16_t pz = p0z + (vzi14 >> 5);
 
-      // Serial.print(x0, DEC); Serial.print(',');
-      // Serial.print(x1, DEC); Serial.print(',');
-      // Serial.print(x2, DEC); Serial.print(',');
-      // Serial.print(x3, DEC); Serial.print(',');
-      // Serial.print(x4, DEC); Serial.print(',');
-      // Serial.print(x5, DEC); Serial.print(',');
-      // Serial.print(x6, DEC); Serial.print(',');
-      // Serial.print(x7, DEC); Serial.print(',');
-      // Serial.print(x, DEC); Serial.print(',');
-      // Serial.print(y, DEC); Serial.print(',');
-      // Serial.print(N, DEC); Serial.print(',');
-      // Serial.println(z, DEC);
+      int16_t lx0 = sB >> 2;
+      int16_t ly0 = sAcB - cA >> 2;
+      int16_t lz0 = -cAcB - sA >> 2;
 
-      if(x >= 0 && x < OUT_WIDTH && y >= 0 && y < OUT_HEIGHT && z < zbuf[off]) {
-        zbuf[off] = z;
-        outbuf[off] = luminance_map[(N > 0) ? ((N < 12) ? N : 11) : 0];
+      while(1) {
+        int16_t t0, t1, t2, d;
+        int16_t lx = lx0, ly = ly0, lz = lz0;
+
+        t0 = length_cordic(px, py, &lx, ly);
+        t1 = t0 - r2i;
+        t2 = length_cordic(pz, t1, &lz, lx);
+        d = t2 - r1i;
+        t += d;
+
+        if(t > 8 * 256) {
+          Serial.print(' ');
+          break;
+        } else if(d < 2) {
+          int8_t N = lz >> 9;
+          Serial.print(luminance_map[(N > 0) ? ((N < 12) ? N : 11) : 0]);
+          break;
+        }
+
+        int16_t dx = 0, dy = 0, dz = 0;
+        int16_t a = vxi14, b = vyi14, c = vzi14;
+        while(d) {
+          if(d & 1024) {
+            dx += a;
+            dy += b;
+            dz += c;
+          }
+
+          d = (d & 1023) << 1;
+          a >>= 1;
+          b >>= 1;
+          c >>= 1;
+        }
+
+        px += dx >> 4;
+        py += dy >> 4;
+        pz += dz >> 4;
       }
-
-      R(5UL, 8, cosI, sinI);
     }
 
-    R(9UL, 7, cosJ, sinJ);
+    Serial.println();
   }
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
   render();
-  // Serial.println();
 
-  uint16_t off = 0;
-  for(uint8_t y = 0; y < OUT_HEIGHT; y++) {
-    for(uint8_t x = 0; x < OUT_PAD; x++) Serial.print(' ');
-    for(uint8_t x = 0; x < OUT_WIDTH; x++, off++) Serial.print(outbuf[off]);
-    Serial.println();
-  }
+  R(5, cA, sA);
+  R(5, cAsB, sAsB);
+  R(5, cAcB, sAcB);
+  R(6, cB, sB);
+  R(6, cAcB, cAsB);
+  R(6, sAcB, sAsB);
 
-  R(5UL, 7, cosA, sinA);
-  R(5UL, 8, cosB, sinB);
-
-  Serial.print("\x1b[23A"); // reset to home position
+  Serial.print("\x1b[H"); // reset to home position
 
 #if DELAY > 0
   delay(DELAY);

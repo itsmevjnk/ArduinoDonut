@@ -2,7 +2,7 @@
 
 This Arduino sketch renders a rotating donut to the default serial port (`Serial`).
 
-It is based on Andy Sloane's float-less `donut.c` code, which can be found [here](https://www.a1k0n.net/2021/01/13/optimizing-donut.html).
+It is based on Andy Sloane's add-and-shift `donut.c` code, which can be found [here](https://twitter.com/a1k0n/status/1716306717196030290).
 
 ## Supported hardware
 
