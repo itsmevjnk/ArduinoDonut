@@ -6,7 +6,7 @@ It is based on Andy Sloane's add-and-shift `donut.c` code, which can be found [h
 
 ## Supported hardware
 
-Theoretically, this sketch should run on any Arduino-compatible MCU with at least 2K of RAM (e.g. ATmega328/Arduino Uno).
+Theoretically, this sketch should run on any Arduino-compatible MCU with at least 4K of Flash memory (i.e. program storage space) and 256 bytes of RAM (e.g. as low as ATtiny45/85, or ATmega328/Arduino Uno).
 
 This sketch has been confirmed to be working on the ESP32 and Arduino Mega.
 
