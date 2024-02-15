@@ -9,6 +9,7 @@
 /* render options */
 #define R1                    1UL
 #define R2                    2UL
+// #define USE_MULTIPLY                  // uncomment this to use multiplication operations - suitable for MCUs with hardware multiplication instructions
 
 /* output options */
 #define BAUD                  115200  // change this to the baud rate you prefer
@@ -112,6 +113,11 @@ void render() {
           break;
         }
 
+#ifdef USE_MULTIPLY
+        px += (int32_t)d * vxi14 >> 14;
+        py += (int32_t)d * vyi14 >> 14;
+        pz += (int32_t)d * vzi14 >> 14;
+#else
         int16_t dx = 0, dy = 0, dz = 0;
         int16_t a = vxi14, b = vyi14, c = vzi14;
         while(d) {
@@ -130,6 +136,8 @@ void render() {
         px += dx >> 4;
         py += dy >> 4;
         pz += dz >> 4;
+#endif
+
       }
     }
 
